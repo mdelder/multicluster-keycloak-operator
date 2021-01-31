@@ -71,11 +71,9 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 	r.Log.Info("Reconciling", "AuthorizationDomain", authzDomain)
 
-	// Check if this deployment already exists in the specified namespace
+	// Create the Realm
 	found := &keycloakv1alpha1.KeycloakRealm{}
 	err := r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.ObjectMeta.Name, Namespace: "keycloak"}, found)
-
-	// If not exists, then create it
 	if err != nil && errors.IsNotFound(err) {
 		r.Log.Info("Creating KeycloakRealm", "KeycloakRealm", found)
 		realm := r.createKeycloakRealm(authzDomain)
@@ -83,7 +81,23 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil
+		// return ctrl.Result{}, nil
+	} else if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// For each ManagedCluster, create the KeycloakClient
+	clusterName := "cluster1"
+	baseDomain := "demo.red-chesterfield.com"
+	err = r.Client.Get(context.TODO(), types.NamespacedName{Name: fmt.Sprintf("%s-%s-%s", authzDomain.ObjectMeta.Name, clusterName, baseDomain), Namespace: "keycloak"}, found)
+	if err != nil && errors.IsNotFound(err) {
+		r.Log.Info("Creating KeycloakClient", "KeycloakClient", found)
+		client := r.createKeycloakClient(authzDomain, clusterName, baseDomain)
+		err = r.Client.Create(context.TODO(), client)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		// return ctrl.Result{}, nil
 	} else if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -103,7 +117,8 @@ func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multicl
 			Name:      authzDomain.ObjectMeta.Name,
 			Namespace: "keycloak",
 			Labels: map[string]string{
-				"app": "sso",
+				"app":   "sso",
+				"realm": authzDomain.ObjectMeta.Name,
 			},
 		},
 		Spec: keycloakv1alpha1.KeycloakRealmSpec{
@@ -128,10 +143,39 @@ func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multicl
 			},
 			InstanceSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app": "sso",
+					"app":   "sso",
+					"realm": authzDomain.ObjectMeta.Name,
 				},
 			},
 		},
 	}
 	return realm
+}
+
+func (r *AuthorizationDomainReconciler) createKeycloakClient(authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain, clusterName string, baseDomain string /* + ManagedCluster*/) *keycloakv1alpha1.KeycloakClient {
+	clientID := fmt.Sprintf("%s-%s-%s", authzDomain.ObjectMeta.Name, clusterName, baseDomain)
+	client := &keycloakv1alpha1.KeycloakClient{
+		TypeMeta:   metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{Name: clientID, Namespace: "keycloak", Labels: map[string]string{"app": "sso"}},
+		Spec: keycloakv1alpha1.KeycloakClientSpec{
+			RealmSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app":   "sso",
+					"realm": authzDomain.ObjectMeta.Name,
+				},
+			},
+			Client: &keycloakv1alpha1.KeycloakAPIClient{
+				ClientID:    clientID,
+				Enabled:     true,
+				Secret:      "SAMPLE-CDE6024A-0225-4FF9-B04E-058E95A1095C",
+				BaseURL:     "/oauth2callback/oidcidp",
+				RootURL:     fmt.Sprintf("https://oauth-openshift.apps.%s.%s", clusterName, baseDomain),
+				Description: "Managed Multicluster Keycloak Client",
+				// DefaultRoles:              []string{},
+				RedirectUris:        []string{"/oauth2callback/oidcidp"},
+				StandardFlowEnabled: true,
+			},
+		},
+	}
+	return client
 }

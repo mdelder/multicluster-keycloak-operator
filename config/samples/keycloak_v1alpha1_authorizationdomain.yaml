@@ -3,4 +3,4 @@ kind: AuthorizationDomain
 metadata:
   name: authorizationdomain-sample
 spec:
-  issuerUrl: "https://keycloak-keycloak.apps.foxtrot.demo.red-chesterfield.com/auth/realms/basic"
+  issuerUrl: "https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/basic"

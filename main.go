@@ -25,15 +25,18 @@ import (
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	multiclusterkeycloakv1alpha1 "github.com/mdelder/multicluster-keycloak-operator/api/v1alpha1"
+	"github.com/mdelder/multicluster-keycloak-operator/controllers"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	runtimescheme "sigs.k8s.io/controller-runtime/pkg/scheme"
 
-	keycloakv1alpha1 "github.com/mdelder/multicluster-keycloak-operator/api/v1alpha1"
-	"github.com/mdelder/multicluster-keycloak-operator/controllers"
+	keycloakv1alpha1 "github.com/keycloak/keycloak-operator/pkg/apis/keycloak/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -45,7 +48,15 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(keycloakv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(multiclusterkeycloakv1alpha1.AddToScheme(scheme))
+
+	schemeBuilder := &runtimescheme.Builder{GroupVersion: schema.GroupVersion{Group: "keycloak.org", Version: "v1alpha1"}}
+	schemeBuilder.Register(&keycloakv1alpha1.KeycloakClient{}, &keycloakv1alpha1.KeycloakClientList{}, &keycloakv1alpha1.KeycloakRealm{}, &keycloakv1alpha1.KeycloakRealmList{})
+	if err := schemeBuilder.AddToScheme(scheme); err != nil {
+		setupLog.Error(err, "")
+		os.Exit(1)
+	}
+
 	// +kubebuilder:scaffold:scheme
 }
 

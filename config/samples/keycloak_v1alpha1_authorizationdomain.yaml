@@ -1,6 +1,17 @@
 apiVersion: keycloak.open-cluster-management.io/v1alpha1
 kind: AuthorizationDomain
 metadata:
-  name: authorizationdomain-sample
+  name: sso-ad
 spec:
+  identityProviders:
+  - type: github
+    secretRef: github-oauth-credentials
   issuerUrl: "https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/basic"
+# ---
+# apiVersion: v1
+# kind: Secret
+# stringData:
+#   clientId: <OAuthApp client ID>
+#   clientSecret: <OAuthApp client secret>
+# metadata:
+#   name: github-oauth-credentials

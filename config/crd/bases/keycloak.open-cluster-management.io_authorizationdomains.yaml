@@ -37,6 +37,21 @@ spec:
           spec:
             description: AuthorizationDomainSpec defines the desired state of AuthorizationDomain
             properties:
+              identityProviders:
+                description: 'Identity providers allow you delegate the validation
+                  of the identity outside of Keycloak examples include: {"type":"github",
+                  "secretRef": "<name of secret with clientId/clientSecret from GitHub
+                  OAuthApp>"}'
+                items:
+                  description: Provide details to configure a IdentityProvider for
+                    the KeycloakRealm
+                  properties:
+                    secretRef:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
               issuerURL:
                 description: Identify Keycloak Issuer URL e.g. https://keycloak-keycloak.apps.foxtrot.demo.red-chesterfield.com/auth/realms/basic
                 type: string

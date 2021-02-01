@@ -30,6 +30,10 @@ type AuthorizationDomainSpec struct {
 	// Identify clusters that should be managed under this AuthorizationDomain
 	// Placement *plrv1alpha1.Placement `json:"placement,omitempty"`
 
+	// Identity providers allow you delegate the validation of the identity outside of Keycloak
+	// examples include: {"type":"github", "secretRef": "<name of secret with clientId/clientSecret from GitHub OAuthApp>"}
+	IdentityProviders []IdentityProvider `json:"identityProviders,omitempty"`
+
 	// Identify Keycloak Issuer URL e.g. https://keycloak-keycloak.apps.foxtrot.demo.red-chesterfield.com/auth/realms/basic
 	IssuerURL string `json:"issuerURL,omitempty"`
 }
@@ -59,6 +63,12 @@ type AuthorizationDomainList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AuthorizationDomain `json:"items"`
+}
+
+// Provide details to configure a IdentityProvider for the KeycloakRealm
+type IdentityProvider struct {
+	Type      string `json:"type,omitempty"`
+	SecretRef string `json:"secretRef,omitempty"`
 }
 
 func init() {

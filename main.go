@@ -36,6 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	runtimescheme "sigs.k8s.io/controller-runtime/pkg/scheme"
 
+	ocmclusterv1 "github.com/open-cluster-management/api/cluster/v1"
+
 	keycloakv1alpha1 "github.com/keycloak/keycloak-operator/pkg/apis/keycloak/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -57,6 +59,12 @@ func init() {
 		os.Exit(1)
 	}
 
+	schemeBuilder = &runtimescheme.Builder{GroupVersion: schema.GroupVersion{Group: "cluster.open-cluster-management.io", Version: "v1"}}
+	schemeBuilder.Register(&ocmclusterv1.ManagedCluster{}, &ocmclusterv1.ManagedClusterList{})
+	if err := schemeBuilder.AddToScheme(scheme); err != nil {
+		setupLog.Error(err, "")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:scheme
 }
 

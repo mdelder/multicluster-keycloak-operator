@@ -6,7 +6,7 @@ spec:
   identityProviders:
   - type: github
     secretRef: github-oauth-credentials
-  issuerUrl: "https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/basic"
+  issuerURL: "https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/basic"
 # ---
 # apiVersion: v1
 # kind: Secret

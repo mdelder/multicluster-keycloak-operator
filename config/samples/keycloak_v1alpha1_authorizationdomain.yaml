@@ -6,7 +6,11 @@ spec:
   identityProviders:
   - type: github
     secretRef: github-oauth-credentials
-  issuerURL: "https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/basic"
+  # It should be possible to derive this URL from the Keycloak route + id of the KeycloakRealm
+  issuerURL: "https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/sso-ad"
+  issuerCertificate:
+    configMapRef: ca-config-map
+
 # ---
 # apiVersion: v1
 # kind: Secret

@@ -36,6 +36,8 @@ type AuthorizationDomainSpec struct {
 
 	// Identify Keycloak Issuer URL e.g. https://keycloak-keycloak.apps.foxtrot.demo.red-chesterfield.com/auth/realms/basic
 	IssuerURL string `json:"issuerURL,omitempty"`
+
+	IssuerCertificate IssuerCertificate `json:"issuerCertificate,omitempty"`
 }
 
 // AuthorizationDomainStatus defines the observed state of AuthorizationDomain
@@ -65,10 +67,15 @@ type AuthorizationDomainList struct {
 	Items           []AuthorizationDomain `json:"items"`
 }
 
-// Provide details to configure a IdentityProvider for the KeycloakRealm
+// IdentityProvider provides details to configure a IdentityProvider for the KeycloakRealm
 type IdentityProvider struct {
 	Type      string `json:"type,omitempty"`
 	SecretRef string `json:"secretRef,omitempty"`
+}
+
+// IssuerCertificate for the SSO OAuth2 Keycloak provider, typically from the *.apps route on the Keycloak cluster
+type IssuerCertificate struct {
+	ConfigMapRef string `json:"configMapRef,omitempty"`
 }
 
 func init() {

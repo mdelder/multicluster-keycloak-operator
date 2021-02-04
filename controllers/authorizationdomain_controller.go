@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -28,10 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	ocmclusterv1 "github.com/open-cluster-management/api/cluster/v1"
 	ocmworkv1 "github.com/open-cluster-management/api/work/v1"
@@ -58,13 +62,14 @@ type AuthorizationDomainReconciler struct {
 }
 
 type managedClusterSSOContext struct {
-	AuthorizationDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain
-	ManagedCluster      *ocmclusterv1.ManagedCluster
-	KeycloakClient      *keycloakv1alpha1.KeycloakClient
-	RootURL             string
-	ClientID            string
-	ClientSecret        string
-	BaseDomain          string
+	AuthorizationDomain   *multiclusterkeycloakv1alpha1.AuthorizationDomain
+	ManagedCluster        *ocmclusterv1.ManagedCluster
+	KeycloakClient        *keycloakv1alpha1.KeycloakClient
+	RootURL               string
+	ClientID              string
+	ClientSecret          string
+	OAuthConfigSecretName string
+	BaseDomain            string
 }
 
 func (r *AuthorizationDomainReconciler) newManagedClusterSSOContext(authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain, cluster *ocmclusterv1.ManagedCluster, defaultBaseDomain string) (*managedClusterSSOContext, error) {
@@ -76,9 +81,10 @@ func (r *AuthorizationDomainReconciler) newManagedClusterSSOContext(authzDomain 
 		return nil, errors.NewBadRequest("ManagedCluster may not be nil.")
 	}
 	c := &managedClusterSSOContext{
-		AuthorizationDomain: authzDomain,
-		ManagedCluster:      cluster,
-		ClientID:            fmt.Sprintf("%s-%s", authzDomain.Name, cluster.Name),
+		AuthorizationDomain:   authzDomain,
+		ManagedCluster:        cluster,
+		ClientID:              fmt.Sprintf("%s-%s", authzDomain.Name, cluster.Name),
+		OAuthConfigSecretName: fmt.Sprintf("%s-%s-oauth-credentials", cluster.Name, authzDomain.Name),
 	}
 	c.BaseDomain = defaultBaseDomain
 	if c.ManagedCluster.Status.ClusterClaims != nil {
@@ -90,6 +96,12 @@ func (r *AuthorizationDomainReconciler) newManagedClusterSSOContext(authzDomain 
 				c.ClientSecret = claim.Value
 			}
 		}
+	}
+	if c.ClientSecret == "" {
+		return nil, errors.NewNotFound(schema.GroupResource{Group: "cluster.open-cluster-management.io", Resource: "ManagedClusterClaim"}, "ManagedClusterClaim for \"id.openshift.io\" not found. Attempt to reconcile deferred.")
+	}
+	if c.RootURL == "" {
+		return nil, errors.NewNotFound(schema.GroupResource{Group: "cluster.open-cluster-management.io", Resource: "ManagedClusterClaim"}, "ManagedClusterClaim for \"consoleurl.cluster.open-cluster-management.io\" not found. Attempt to reconcile deferred.")
 	}
 	return c, nil
 }
@@ -121,79 +133,53 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 	isAuthzDomainMarkedToBeDeleted := authzDomain.GetDeletionTimestamp() != nil
 	if isAuthzDomainMarkedToBeDeleted {
 		r.Log.Info("AuthorizationDomain marked for deletion", "AuthorizationDomain", authzDomain)
+		// Add a finalizer to AD to remove the generated ManifestWork _per_ ManagedCluster
 	}
 
 	// Create the Realm
 	found := &keycloakv1alpha1.KeycloakRealm{}
-	err := r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.Name, Namespace: "keycloak"}, found)
-	if err != nil && errors.IsNotFound(err) {
-		realm := r.createKeycloakRealm(authzDomain)
-		r.Log.Info("Creating KeycloakRealm", "KeycloakRealm", realm)
-		if err := r.Client.Create(context.TODO(), realm); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := controllerutil.SetControllerReference(authzDomain, realm, r.Scheme); err != nil {
-			r.Log.Error(err, "Could not set controller reference for KeycloakRealm")
-			return ctrl.Result{}, err
-		}
-	} else if err != nil {
+	realm, err := r.createKeycloakRealm(authzDomain)
+	if err != nil {
+		r.Log.Info("Failed to create KeycloakRealm", "KeycloakRealm", realm)
 		return ctrl.Result{}, err
-	} // else update if necessary
-
-	// For each ManagedCluster, create the KeycloakClient
-
-	baseDomain := "demo.red-chesterfield.com"
-	managedClusterList := &ocmclusterv1.ManagedClusterList{}
-	// clients := &keycloakv1alpha1.KeycloakClientList{}
-	err = r.Client.List(context.Background(), managedClusterList)
-	for _, cluster := range managedClusterList.Items {
-		r.Log.Info("Discovered ManagedCluster", "ManagedClusterName", cluster.Name)
-
-		clusterContext, err := r.newManagedClusterSSOContext(authzDomain, &cluster, baseDomain)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-
-		keycloakClient := &keycloakv1alpha1.KeycloakClient{}
-		keycloakClientName := fmt.Sprintf("%s-%s", authzDomain.Name, cluster.Name)
-		if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: keycloakClientName, Namespace: "keycloak"}, keycloakClient); err != nil {
-			if errors.IsNotFound(err) {
-				keycloakClient = r.createKeycloakClient(clusterContext)
-				r.Log.Info("Creating KeycloakClient", "KeycloakClient", keycloakClient)
-				if err := r.Client.Create(context.TODO(), keycloakClient); err != nil {
-					return ctrl.Result{}, err
-				}
-				if err := controllerutil.SetControllerReference(authzDomain, keycloakClient, r.Scheme); err != nil {
-					r.Log.Error(err, "Could not set controller reference for KeycloakClient")
-					return ctrl.Result{}, err
-				}
-			}
-			return ctrl.Result{}, err
-		} // else update the KeycloakClient if needed
-
-		manifestWork := &ocmworkv1.ManifestWork{}
-		manifestWorkName := fmt.Sprintf("%s-%s-oauth", cluster.Name, authzDomain.Name)
-		r.Log.Info("Looking for existing ManifestWork", "ManifestWorkName", manifestWorkName)
-		if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: manifestWorkName, Namespace: cluster.Name}, manifestWork); err != nil {
-			if errors.IsNotFound(err) {
-				manifestWork, err = r.createManifestWork(clusterContext)
-				if err != nil {
-					return ctrl.Result{}, err
-				}
-				r.Log.Info("Creating ManifestWork", "ManifestWork", manifestWork)
-				if err := r.Client.Create(context.TODO(), manifestWork); err != nil {
-					return ctrl.Result{}, err
-				}
-				// Cross Namespace ownerRefs are BAD
-				// if err := controllerutil.SetControllerReference(authzDomain, manifestWork, r.Scheme); err != nil {
-				// 	r.Log.Error(err, "Could not set controller reference for KeycloakClient")
-				// 	return ctrl.Result{}, err
-				// }
-			} else {
-				r.Log.Error(err, "Could not fetch ManifestWork", "ManifestWorkName", manifestWorkName)
+	}
+	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.Name, Namespace: "keycloak"}, found); err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating KeycloakRealm", "KeycloakRealm", realm)
+			if err := r.Client.Create(context.TODO(), realm); err != nil {
 				return ctrl.Result{}, err
 			}
-		} // else update the ManifestWork if needed
+		} else {
+			return ctrl.Result{}, err
+		}
+	} else if !reflect.DeepEqual(found.Spec, realm.Spec) {
+		realm.Spec.DeepCopyInto(&found.Spec)
+		r.Log.Info("Updating KeycloakRealm", "KeycloakRealm", found)
+		r.Client.Update(context.TODO(), found)
+	}
+
+	baseDomain := "demo.red-chesterfield.com" // temporary
+
+	// For each ManagedCluster, create the KeycloakClient, ManifestWork
+	managedClusterList := &ocmclusterv1.ManagedClusterList{}
+	err = r.Client.List(context.Background(), managedClusterList)
+	errs := []error{}
+	for _, cluster := range managedClusterList.Items {
+		r.Log.Info("Discovered ManagedCluster", "ManagedClusterName", cluster.Name)
+		clusterContext, err := r.newManagedClusterSSOContext(authzDomain, &cluster, baseDomain)
+		if err != nil {
+			errs = append(errs, err)
+		} else {
+			if err := r.createOrUpdateKeycloakClient(clusterContext); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.createOrUpdateManifestWork(clusterContext); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return ctrl.Result{}, errs[0]
 	}
 	return ctrl.Result{}, nil
 }
@@ -202,12 +188,14 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 func (r *AuthorizationDomainReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&multiclusterkeycloakv1alpha1.AuthorizationDomain{}).
+		// watch the Secret / ConfigMap referenced by AuthorizationDomain
+		Watches(&source.Kind{Type: &ocmclusterv1.ManagedCluster{}}, &handler.EnqueueRequestForObject{}).
 		Owns(&keycloakv1alpha1.KeycloakRealm{}).
 		Owns(&keycloakv1alpha1.KeycloakClient{}).
 		Complete(r)
 }
 
-func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain) *keycloakv1alpha1.KeycloakRealm {
+func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain) (*keycloakv1alpha1.KeycloakRealm, error) {
 	secret := &corev1.Secret{}
 	githubClientID, githubClientSecret := "", ""
 	if authzDomain.Spec.IdentityProviders != nil {
@@ -265,12 +253,83 @@ func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multicl
 			},
 		},
 	}
-
-	return realm
+	if err := controllerutil.SetControllerReference(authzDomain, realm, r.Scheme); err != nil {
+		return nil, err
+	}
+	return realm, nil
 }
 
-func (r *AuthorizationDomainReconciler) createKeycloakClient(clusterContext *managedClusterSSOContext) *keycloakv1alpha1.KeycloakClient {
+func (r *AuthorizationDomainReconciler) createManifestWork(clusterContext *managedClusterSSOContext) (*ocmworkv1.ManifestWork, error) {
 
+	oauthCredentialsManifest, err := clusterContext.createOAuthSecretManifest()
+	if err != nil {
+		r.Log.Error(err, "Could create Secret for OAuth client.")
+		return nil, err
+	}
+	oauthClientManifest, err := clusterContext.createOAuthClientManifest()
+	if err != nil {
+		r.Log.Error(err, "Could create OAuth cluster.")
+		return nil, err
+	}
+	oauthClusterRole, err := clusterContext.createClusterRole()
+	if err != nil {
+		r.Log.Error(err, "Could create OAuth cluster.")
+		return nil, err
+	}
+	oauthClusterRoleBinding, err := clusterContext.createClusterRoleBinding()
+	if err != nil {
+		r.Log.Error(err, "Could create OAuth cluster.")
+		return nil, err
+	}
+
+	issuerCertificateConfigMap, err := clusterContext.createIssuerCertificateConfigMap(r.Client)
+	if err != nil || issuerCertificateConfigMap == nil {
+		r.Log.Error(err, "Could find IssuerCertificate.", "issuerCerficate.configMapRef", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
+		return nil, err
+	}
+	r.Log.Info("Found IssuerCertificate ConfigMap", "IssuerCertificateName", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
+	manifestwork := &ocmworkv1.ManifestWork{
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-oauth", clusterContext.ClientID), Namespace: clusterContext.ManagedCluster.Name, Labels: map[string]string{"app": "sso"}},
+		Spec: ocmworkv1.ManifestWorkSpec{
+			Workload: ocmworkv1.ManifestsTemplate{
+				Manifests: []ocmworkv1.Manifest{
+					*oauthClusterRole,
+					*oauthClusterRoleBinding,
+					*oauthClientManifest,
+					*oauthCredentialsManifest,
+					*issuerCertificateConfigMap,
+				},
+			},
+		},
+	}
+	return manifestwork, nil
+}
+
+func (r *AuthorizationDomainReconciler) createOrUpdateKeycloakClient(clusterContext *managedClusterSSOContext) error {
+	found := &keycloakv1alpha1.KeycloakClient{}
+	keycloakClient, err := r.createKeycloakClient(clusterContext)
+	if err != nil {
+		return err
+	}
+	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: clusterContext.ClientID, Namespace: "keycloak"}, found); err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating KeycloakClient", "KeycloakClient", keycloakClient)
+			if err := r.Client.Create(context.TODO(), keycloakClient); err != nil {
+				return err
+			}
+		}
+		return err
+	} else if !reflect.DeepEqual(found.Spec, keycloakClient.Spec) {
+		keycloakClient.Spec.DeepCopyInto(&found.Spec)
+		err := r.Client.Update(context.TODO(), found)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *AuthorizationDomainReconciler) createKeycloakClient(clusterContext *managedClusterSSOContext) (*keycloakv1alpha1.KeycloakClient, error) {
 	client := &keycloakv1alpha1.KeycloakClient{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{Name: clusterContext.ClientID, Namespace: "keycloak", Labels: map[string]string{
@@ -297,51 +356,49 @@ func (r *AuthorizationDomainReconciler) createKeycloakClient(clusterContext *man
 			},
 		},
 	}
-	return client
+	if err := controllerutil.SetControllerReference(clusterContext.AuthorizationDomain, client, r.Scheme); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
-
-func (r *AuthorizationDomainReconciler) createManifestWork(clusterContext *managedClusterSSOContext) (*ocmworkv1.ManifestWork, error) {
-
-	oauthCredentialsManifest, err := clusterContext.createOAuthSecretManifest()
+func (r *AuthorizationDomainReconciler) createOrUpdateManifestWork(clusterContext *managedClusterSSOContext) error {
+	manifestWork := &ocmworkv1.ManifestWork{}
+	manifestWorkName := fmt.Sprintf("%s-oauth", clusterContext.ClientID)
+	r.Log.Info("Looking for existing ManifestWork", "ManifestWorkName", manifestWorkName)
+	manifestWork, err := r.createManifestWork(clusterContext)
 	if err != nil {
-		r.Log.Error(err, "Could create Secret for OAuth client.")
-		return nil, err
+		return err
 	}
-	oauthClientManifest, err := clusterContext.createOAuthClientManifest()
-	if err != nil {
-		r.Log.Error(err, "Could create OAuth cluster.")
-		return nil, err
+	found := &ocmworkv1.ManifestWork{}
+	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: manifestWorkName, Namespace: clusterContext.ManagedCluster.Name}, found); err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating ManifestWork", "ManifestWork", manifestWork)
+			if err := r.Client.Create(context.TODO(), manifestWork); err != nil {
+				return err
+			}
+			// Cross Namespace ownerRefs are BAD
+			// if err := controllerutil.SetControllerReference(authzDomain, manifestWork, r.Scheme); err != nil {
+			// 	r.Log.Error(err, "Could not set controller reference for KeycloakClient")
+			// 	return ctrl.Result{}, err
+			// }
+		} else {
+			r.Log.Error(err, "Could not fetch ManifestWork", "ManifestWorkName", manifestWorkName)
+			return err
+		}
+	} else if !reflect.DeepEqual(found.Spec, manifestWork.Spec) {
+		manifestWork.Spec.DeepCopyInto(&found.Spec)
+		err := r.Client.Update(context.TODO(), found)
+		if err != nil {
+			return err
+		}
 	}
-	oauthClusterRole, err := clusterContext.createClusterRole()
-	if err != nil {
-		r.Log.Error(err, "Could create OAuth cluster.")
-		return nil, err
-	}
-	oauthClusterRoleBinding, err := clusterContext.createClusterRoleBinding()
-	if err != nil {
-		r.Log.Error(err, "Could create OAuth cluster.")
-		return nil, err
-	}
-	manifestwork := &ocmworkv1.ManifestWork{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-%s-oauth", clusterContext.ManagedCluster.Name, clusterContext.AuthorizationDomain.Name), Namespace: clusterContext.ManagedCluster.Name, Labels: map[string]string{"app": "sso"}},
-		Spec: ocmworkv1.ManifestWorkSpec{
-			Workload: ocmworkv1.ManifestsTemplate{
-				Manifests: []ocmworkv1.Manifest{
-					*oauthClusterRole,
-					*oauthClusterRoleBinding,
-					*oauthClientManifest,
-					*oauthCredentialsManifest,
-				},
-			},
-		},
-	}
-	return manifestwork, nil
+	return nil
 }
 
 func (c *managedClusterSSOContext) createOAuthSecretManifest() (*ocmworkv1.Manifest, error) {
 	return c.createManifest(&corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{Kind: "Secret", APIVersion: "v1"},
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-%s-oauth-credentials", c.ManagedCluster.Name, c.AuthorizationDomain.Name), Namespace: "openshift-config", Labels: map[string]string{"app": "sso"}},
+		ObjectMeta: metav1.ObjectMeta{Name: c.OAuthConfigSecretName, Namespace: "openshift-config", Labels: map[string]string{"app": "sso"}},
 		Data: map[string][]byte{
 			"clientID":     []byte(c.ClientID),
 			"clientSecret": []byte(c.ClientSecret),
@@ -390,7 +447,7 @@ func (c *managedClusterSSOContext) createOAuthClientManifest() (*ocmworkv1.Manif
 		   ]
 		}
 	 }
-	`, c.ClientID, c.ClientID, c.AuthorizationDomain.Spec.IssuerURL))
+	`, c.ClientID, c.OAuthConfigSecretName, c.AuthorizationDomain.Spec.IssuerURL))
 	oauthClientManifest := &ocmworkv1.Manifest{}
 	oauthClientManifest.RawExtension = runtime.RawExtension{Raw: oauthClientJSON}
 	return oauthClientManifest, nil
@@ -418,6 +475,24 @@ func (c *managedClusterSSOContext) createClusterRoleBinding() (*ocmworkv1.Manife
 		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "klusterlet-work-sa", Namespace: "open-cluster-management-agent"}},
 		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "open-cluster-management:klusterlet-work-sa:agent:oauth-edit"},
 	})
+}
+
+func (c *managedClusterSSOContext) createIssuerCertificateConfigMap(client client.Client) (*ocmworkv1.Manifest, error) {
+	configMap := &corev1.ConfigMap{}
+	if c.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef != "" {
+		err := client.Get(context.TODO(), types.NamespacedName{Name: c.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef, Namespace: "keycloak"}, configMap)
+		if err != nil {
+			return nil, err
+		}
+		// The IssuerCertificate should be created in the "openshift-config" namespace
+		configMap.ObjectMeta.Namespace = "openshift-config"
+		configMap.ObjectMeta.ResourceVersion = ""
+		configMap.ObjectMeta.SelfLink = ""
+		configMap.ObjectMeta.UID = ""
+		configMap.ObjectMeta.ManagedFields = []metav1.ManagedFieldsEntry{}
+		return c.createManifest(configMap)
+	}
+	return nil, nil
 }
 
 func (c *managedClusterSSOContext) createManifest(obj interface{}) (*ocmworkv1.Manifest, error) {

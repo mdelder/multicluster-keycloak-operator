@@ -1,0 +1,8 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: open-cluster-management:klusterlet-work-sa:agent:oauth-edit
+rules:
+- apiGroups: ["config.openshift.io"]
+  resources: ["oauths"]
+  verbs: ["create", "get", "list", "update", "delete"]

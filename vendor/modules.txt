@@ -142,10 +142,6 @@ github.com/onsi/gomega/types
 ## explicit
 github.com/open-cluster-management/api/cluster/v1
 github.com/open-cluster-management/api/work/v1
-# github.com/open-cluster-management/registration v0.0.0-20210127152631-4839ac6a02e2
-## explicit
-# github.com/openshift/api v3.9.0+incompatible
-## explicit
 # github.com/openshift/build-machinery-go v0.0.0-20210115170933-e575b44a7a94
 ## explicit
 github.com/openshift/build-machinery-go
@@ -156,10 +152,9 @@ github.com/openshift/build-machinery-go/make/targets/golang
 github.com/openshift/build-machinery-go/make/targets/openshift
 github.com/openshift/build-machinery-go/make/targets/openshift/operator
 github.com/openshift/build-machinery-go/scripts
-# github.com/openshift/client-go v0.0.0-20201214125552-e615e336eb49
+# github.com/openshift/library-go v0.0.0-20210203125322-0b51ce122213
 ## explicit
-# github.com/openshift/library-go v0.0.0-20210127081712-a4f002827e42
-## explicit
+github.com/openshift/library-go/pkg/assets
 # github.com/pkg/errors v0.9.1
 github.com/pkg/errors
 # github.com/prometheus/client_golang v1.7.1
@@ -381,6 +376,7 @@ k8s.io/apimachinery/pkg/util/json
 k8s.io/apimachinery/pkg/util/mergepatch
 k8s.io/apimachinery/pkg/util/naming
 k8s.io/apimachinery/pkg/util/net
+k8s.io/apimachinery/pkg/util/rand
 k8s.io/apimachinery/pkg/util/runtime
 k8s.io/apimachinery/pkg/util/sets
 k8s.io/apimachinery/pkg/util/strategicpatch
@@ -540,6 +536,7 @@ sigs.k8s.io/controller-runtime/pkg/webhook/internal/metrics
 # sigs.k8s.io/structured-merge-diff/v4 v4.0.2
 sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.2.0
+## explicit
 sigs.k8s.io/yaml
 # k8s.io/apimachinery => k8s.io/apimachinery v0.20.2
 # k8s.io/client-go => k8s.io/client-go v0.20.2

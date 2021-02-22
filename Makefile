@@ -1,12 +1,12 @@
 
 # Include the library makefile
-include $(addprefix ./vendor/github.com/openshift/build-machinery-go/make/, \
-	golang.mk \
-	targets/openshift/deps.mk \
-	targets/openshift/images.mk \
-	targets/openshift/bindata.mk \
-	lib/tmp.mk \
-)
+#include $(addprefix ./vendor/github.com/openshift/build-machinery-go/make/, \
+#	golang.mk \
+#	targets/openshift/deps.mk \
+#	targets/openshift/images.mk \
+#	targets/openshift/bindata.mk \
+#	lib/tmp.mk \
+#)
 
 # Current Operator version
 VERSION ?= 0.0.1
@@ -33,7 +33,7 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
-# $(call add-bindata,authorizationdomain,./controllers/manifests/...,bindata,bindata,./controllers/bindata/bindata.go)
+$(call add-bindata,authorizationdomain,./controllers/manifests/...,bindata,bindata,./controllers/bindata/bindata.go)
 
 all: manager
 

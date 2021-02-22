@@ -9,15 +9,13 @@ require (
 	github.com/onsi/ginkgo v1.14.2
 	github.com/onsi/gomega v1.10.4
 	github.com/open-cluster-management/api v0.0.0-20201126023000-353dd8370f4d
-	github.com/open-cluster-management/registration v0.0.0-20210127152631-4839ac6a02e2 // indirect
-	github.com/openshift/api v3.9.0+incompatible // indirect
 	github.com/openshift/build-machinery-go v0.0.0-20210115170933-e575b44a7a94
-	github.com/openshift/client-go v0.0.0-20201214125552-e615e336eb49 // indirect
-	github.com/openshift/library-go v0.0.0-20210127081712-a4f002827e42 // indirect
+	github.com/openshift/library-go v0.0.0-20210203125322-0b51ce122213
 	k8s.io/api v0.20.2
 	k8s.io/apimachinery v0.20.2
 	k8s.io/client-go v12.0.0+incompatible
 	sigs.k8s.io/controller-runtime v0.8.1
+	sigs.k8s.io/yaml v1.2.0
 )
 
 replace (

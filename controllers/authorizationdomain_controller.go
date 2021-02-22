@@ -87,19 +87,20 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 		r.Log.Info("Failed to create KeycloakRealm", "KeycloakRealm", realm)
 		return ctrl.Result{}, err
 	}
-	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.Name, Namespace: "keycloak"}, found); err != nil {
-		if errors.IsNotFound(err) {
-			r.Log.Info("Creating KeycloakRealm", "KeycloakRealm", realm)
-			if err := r.Client.Create(context.TODO(), realm); err != nil {
-				return ctrl.Result{}, err
-			}
-		} else {
-			return ctrl.Result{}, err
-		}
-	} else if !reflect.DeepEqual(found.Spec, realm.Spec) {
+	err = r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.Name, Namespace: "keycloak"}, found)
+	switch {
+	case errors.IsNotFound(err):
+		r.Log.Info("Creating KeycloakRealm", "KeycloakRealm", realm)
+		return ctrl.Result{}, r.Client.Create(context.TODO(), realm)
+	case err != nil:
+		return ctrl.Result{}, err
+	}
+	if !reflect.DeepEqual(found.Spec, realm.Spec) {
 		realm.Spec.DeepCopyInto(&found.Spec)
 		r.Log.Info("Updating KeycloakRealm", "KeycloakRealm", found)
-		r.Client.Update(context.TODO(), found)
+		if err := r.Client.Update(context.TODO(), found); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// For each ManagedCluster, create the KeycloakClient, ManifestWork

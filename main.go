@@ -114,6 +114,15 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "AuthorizationDomain")
 		os.Exit(1)
 	}
+
+	if err := (&controllers.ManagedClusterReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("ManagedCluster"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ManagedCluster")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("health", healthz.Ping); err != nil {

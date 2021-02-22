@@ -34,7 +34,7 @@ func (r *ManagedClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, nil
 		}
 	}
-	r.Log.Info("Reconciling", "ManagedClusterr", cluster)
+	r.Log.Info("Reconciling", "ManagedCluster", cluster)
 
 	authzDomainList := &multiclusterkeycloakv1alpha1.AuthorizationDomainList{}
 	if err := r.Client.List(context.Background(), authzDomainList); err != nil {

@@ -168,19 +168,16 @@ func (c *managedClusterSSOContext) keycloakClient() *keycloakv1alpha1.KeycloakCl
 func (c *managedClusterSSOContext) createOrUpdateKeycloakClient() error {
 	found := &keycloakv1alpha1.KeycloakClient{}
 	keycloakClient := c.keycloakClient()
-	if err := c.client.Get(context.TODO(), types.NamespacedName{Name: c.ClientID, Namespace: "keycloak"}, found); err != nil {
-		if errors.IsNotFound(err) {
-			if err := c.client.Create(context.TODO(), keycloakClient); err != nil {
-				return err
-			}
-		}
+	err := c.client.Get(context.TODO(), types.NamespacedName{Name: c.ClientID, Namespace: "keycloak"}, found)
+	switch {
+	case errors.IsNotFound(err):
+		return c.client.Create(context.TODO(), keycloakClient)
+	case err != nil:
 		return err
-	} else if !reflect.DeepEqual(found.Spec, keycloakClient.Spec) {
+	}
+	if !reflect.DeepEqual(found.Spec, keycloakClient.Spec) {
 		keycloakClient.Spec.DeepCopyInto(&found.Spec)
-		err := c.client.Update(context.TODO(), found)
-		if err != nil {
-			return err
-		}
+		return c.client.Update(context.TODO(), found)
 	}
 	return nil
 }
@@ -191,16 +188,18 @@ func (c *managedClusterSSOContext) createOrUpdateManifestWork() error {
 		return err
 	}
 	found := &ocmworkv1.ManifestWork{}
-	if err := c.client.Get(context.TODO(), types.NamespacedName{Name: manifestWork.Name, Namespace: c.ManagedCluster.Name}, found); err != nil {
-		if errors.IsNotFound(err) {
-			return c.client.Create(context.TODO(), manifestWork)
-		}
-	} else if !reflect.DeepEqual(found.Spec, manifestWork.Spec) {
-		manifestWork.Spec.DeepCopyInto(&found.Spec)
-		err := c.client.Update(context.TODO(), found)
-		if err != nil {
-			return err
-		}
+	err = c.client.Get(context.TODO(), types.NamespacedName{Name: manifestWork.Name, Namespace: c.ManagedCluster.Name}, found)
+	switch {
+	case errors.IsNotFound(err):
+		return c.client.Create(context.TODO(), manifestWork)
+	case err != nil:
+		return err
 	}
+
+	if !reflect.DeepEqual(found.Spec, manifestWork.Spec) {
+		manifestWork.Spec.DeepCopyInto(&found.Spec)
+		return c.client.Update(context.TODO(), found)
+	}
+
 	return nil
 }

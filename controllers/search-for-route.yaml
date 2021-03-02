@@ -1,0 +1,12 @@
+apiVersion: view.open-cluster-management.io/v1beta1
+kind: ManagedClusterView
+metadata:
+  generateName: oauth-route-view-
+  labels:
+    app: sso
+    namespace: local-cluster
+spec:
+  scope:
+    name: oauth-openshift
+    namespace: openshift-authentication
+    resource: route

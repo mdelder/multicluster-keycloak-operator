@@ -13,3 +13,4 @@ resources:
 - keycloak-group-rolebinding.yaml
 - placementrules-rolebinding.yaml
 - managed-cluster-rolebinding.yaml
+- manager-secret-rolebinding.yaml

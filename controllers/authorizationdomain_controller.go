@@ -134,16 +134,19 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 	if isAuthzDomainMarkedToBeDeleted {
 		r.Log.Info("AuthorizationDomain marked for deletion", "AuthorizationDomain", authzDomain)
 		// Add a finalizer to AD to remove the generated ManifestWork _per_ ManagedCluster
+		return r.Delete(ctx, authzDomain)
+
 	}
 
 	// Create the Realm
+	r.Log.Info("Creating KeycloakRealm", "AuthorizationDomain.Name", authzDomain.Name, "AuthorizationDomain.Namespace", authzDomain.Namespace)
 	found := &keycloakv1alpha1.KeycloakRealm{}
 	realm, err := r.createKeycloakRealm(authzDomain)
 	if err != nil {
 		r.Log.Info("Failed to create KeycloakRealm", "KeycloakRealm", realm)
 		return ctrl.Result{}, err
 	}
-	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.Name, Namespace: "keycloak"}, found); err != nil {
+	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: authzDomain.Name, Namespace: authzDomain.Namespace}, found); err != nil {
 		if errors.IsNotFound(err) {
 			r.Log.Info("Creating KeycloakRealm", "KeycloakRealm", realm)
 			if err := r.Client.Create(context.TODO(), realm); err != nil {
@@ -160,6 +163,7 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	baseDomain := "demo.red-chesterfield.com" // temporary
 
+	r.Log.Info("Retrieving ManagedClusters attached to the ClusterManager", "AuthorizationDomain.Name", authzDomain.Name, "AuthorizationDomain.Namespace", authzDomain.Namespace)
 	// For each ManagedCluster, create the KeycloakClient, ManifestWork
 	managedClusterList := &ocmclusterv1.ManagedClusterList{}
 	err = r.Client.List(context.Background(), managedClusterList)
@@ -181,6 +185,11 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 	if len(errs) > 0 {
 		return ctrl.Result{}, errs[0]
 	}
+	return ctrl.Result{}, nil
+}
+
+func (r *AuthorizationDomainReconciler) Delete(ctx context.Context, authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain) (ctrl.Result, error) {
+	r.Log.Error("WARNING: No specialized delete process is currently implemented to clean up created resources.", "AuthorizationDomain.Namespace", authzDomain.Namespace, "AuthorizationDomain.Name", authzDomain.Name)
 	return ctrl.Result{}, nil
 }
 
@@ -206,7 +215,7 @@ func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multicl
 			} else if provider.SecretRef == "" {
 				r.Log.Info("Missing provider \"secretRef\". Currently supported types: {\"github\"}.")
 			} else {
-				if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: provider.SecretRef, Namespace: "keycloak"}, secret); err != nil {
+				if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: provider.SecretRef, Namespace: authzDomain.Namespace}, secret); err != nil {
 					r.Log.Error(err, "Could not find the referenced secret for IdentityProvider", "AuthorizationDomain", authzDomain, "SecretRef", provider.SecretRef)
 				} else {
 					githubClientID = string(secret.Data["clientId"])
@@ -219,7 +228,7 @@ func (r *AuthorizationDomainReconciler) createKeycloakRealm(authzDomain *multicl
 	realm := &keycloakv1alpha1.KeycloakRealm{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      authzDomain.Name,
-			Namespace: "keycloak",
+			Namespace: authzDomain.Namespace,
 			Labels: map[string]string{
 				"app": "sso",
 				// "realm": authzDomain.Name,
@@ -284,7 +293,7 @@ func (r *AuthorizationDomainReconciler) createManifestWork(clusterContext *manag
 
 	issuerCertificateConfigMap, err := clusterContext.createIssuerCertificateConfigMap(r.Client)
 	if err != nil || issuerCertificateConfigMap == nil {
-		r.Log.Error(err, "Could find IssuerCertificate.", "issuerCerficate.configMapRef", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
+		r.Log.Error(err, "Could not find IssuerCertificate.", "issuerCerficate.configMapRef", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
 		return nil, err
 	}
 	r.Log.Info("Found IssuerCertificate ConfigMap", "IssuerCertificateName", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
@@ -311,7 +320,7 @@ func (r *AuthorizationDomainReconciler) createOrUpdateKeycloakClient(clusterCont
 	if err != nil {
 		return err
 	}
-	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: clusterContext.ClientID, Namespace: "keycloak"}, found); err != nil {
+	if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: clusterContext.ClientID, Namespace: clusterContext.AuthorizationDomain.Namespace}, found); err != nil {
 		if errors.IsNotFound(err) {
 			r.Log.Info("Creating KeycloakClient", "KeycloakClient", keycloakClient)
 			if err := r.Client.Create(context.TODO(), keycloakClient); err != nil {
@@ -332,7 +341,7 @@ func (r *AuthorizationDomainReconciler) createOrUpdateKeycloakClient(clusterCont
 func (r *AuthorizationDomainReconciler) createKeycloakClient(clusterContext *managedClusterSSOContext) (*keycloakv1alpha1.KeycloakClient, error) {
 	client := &keycloakv1alpha1.KeycloakClient{
 		TypeMeta: metav1.TypeMeta{},
-		ObjectMeta: metav1.ObjectMeta{Name: clusterContext.ClientID, Namespace: "keycloak", Labels: map[string]string{
+		ObjectMeta: metav1.ObjectMeta{Name: clusterContext.ClientID, Namespace: clusterContext.AuthorizationDomain.Namespace, Labels: map[string]string{
 			"app": "sso",
 			// "realm": authzDomain.Name
 		}},
@@ -480,7 +489,7 @@ func (c *managedClusterSSOContext) createClusterRoleBinding() (*ocmworkv1.Manife
 func (c *managedClusterSSOContext) createIssuerCertificateConfigMap(client client.Client) (*ocmworkv1.Manifest, error) {
 	configMap := &corev1.ConfigMap{}
 	if c.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef != "" {
-		err := client.Get(context.TODO(), types.NamespacedName{Name: c.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef, Namespace: "keycloak"}, configMap)
+		err := client.Get(context.TODO(), types.NamespacedName{Name: c.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef, Namespace: c.AuthorizationDomain.Namespace}, configMap)
 		if err != nil {
 			return nil, err
 		}

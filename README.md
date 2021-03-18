@@ -13,13 +13,7 @@ Currently, a work-in-progress.
 
 ## Getting Started
 
-1. Deploy the Multicluster Keycloak Operator into your cluster.
-```
-export KUBECONFIG=./path/to/your/kubeconfig
-make install
-make run
-```
-2. Install the Red Hat Single Sign-On Operator from the OpenShift Operator Catalog.
+1. Install the Red Hat Single Sign-On Operator from the OpenShift Operator Catalog.
 ```
 apiVersion: operators.coreos.com/v1alpha1
 kind: Subscription
@@ -36,7 +30,7 @@ spec:
   sourceNamespace: openshift-marketplace
   startingCSV: rhsso-operator.7.4.4
 ```
-3. Configure a running instance of Keycloak, the service that is managed by the Red Hat SSO Operator.
+2. Configure a running instance of Keycloak, the service that is managed by the Red Hat SSO Operator.
 ```
 apiVersion: keycloak.org/v1alpha1
 kind: Keycloak
@@ -50,11 +44,20 @@ spec:
     enabled: true
   instances: 1
 ```
-4. Register an OAuth App on GitHub (see the [GitHub docs](https://docs.github.com/en/developers/apps/creating-an-oauth-app)).
+3. Deploy the Multicluster Keycloak Operator into your cluster.
+```
+export KUBECONFIG=./path/to/your/kubeconfig
+make install
+make deploy
+```
+
+At this point, you can configure the `AuthorizationDomain` object that will reference your GitHub OAuthApp and inject configuration to each ManagedCluster to use the Red Hat Single Sign-On (SSO) operator that you configured above.
+
+1. Register an OAuth App on GitHub (see the [GitHub docs](https://docs.github.com/en/developers/apps/creating-an-oauth-app)).
     - Use any value for the `homepageURL`.
     - Use `https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/sso-ad/broker/github/endpoint` for the `OAuthCallbackURL`. The Route will be served by the instance of Keycloak deployed in step 3. The segment "sso-ad" is **MUST** be used as the name of the `AuthorizationDomain` created below. So if you create an `AuthorizationDomain` of a different name, then replace "sso-ad" in this URL with the name that you used for the `AuthorizationDomain`.
     - Retrieve the `clientID` and `clientSecret`.
-5. Create a ConfigMap in the Namespace `keycloak` with the TLS Certificate for the route above (e.g. `https://*.apps.<clusterName>.<baseDomain>`):
+2. Create a ConfigMap in the Namespace `keycloak` with the TLS Certificate for the route above (e.g. `https://*.apps.<clusterName>.<baseDomain>`):
 ```
 apiVersion:
 kind: ConfigMap
@@ -70,7 +73,7 @@ data:
     ...
     -----END CERTIFICATE-----
 ```
-6. Create a Secret in the Namespace `keycloak` to store the GitHub OAuth `clientID` and `clientSecret`.
+3. Create a Secret in the Namespace `keycloak` to store the GitHub OAuth `clientID` and `clientSecret`.
 ```
 apiVersion: v1
 kind: Secret
@@ -82,7 +85,7 @@ metadata:
   namespace: keycloak
 type: Opaque
 ```
-7. Create an `AuthorizationDomain`. The Multicluster Keycloak Operator (in this project) will reconcile the `AuthorizationDomain` CR and create the necessary `Keycloak` resources to allow any `ManagedCluster` to use the running `Keycloak` service on the Hub as an OAuth2 Identity Provider. In addition, every `ManagedCluster` will pick up a new `ManifestWork` that configures its local `OAuth` `cluster` CR.
+4. Create an `AuthorizationDomain`. The Multicluster Keycloak Operator (in this project) will reconcile the `AuthorizationDomain` CR and create the necessary `Keycloak` resources to allow any `ManagedCluster` to use the running `Keycloak` service on the Hub as an OAuth2 Identity Provider. In addition, every `ManagedCluster` will pick up a new `ManifestWork` that configures its local `OAuth` `cluster` CR.
 ```
 apiVersion: keycloak.open-cluster-management.io/v1alpha1
 kind: AuthorizationDomain
@@ -247,7 +250,8 @@ spec:
 
 ## Project assembly
 
-Created following the [Operator SDK Tutorial for Golang](https://sdk.operatorframework.io/docs/building-operators/golang/tutorial/).
+The initial project was created following the [Operator SDK Tutorial for Golang](https://sdk.operatorframework.io/docs/building-operators/golang/tutorial/).
+
 ```bash
 operator-sdk init operator-sdk init --domain=open-cluster-management.io
 operator-sdk create api --group=keycloak --version=v1alpha1 --kind=AuthorizationDomain
@@ -255,6 +259,18 @@ go mod vendor
 
 make generate
 make manifests
+```
+
+## Developing/Contributing
+
+Contributions are welcome and encouraged via Pull Requests.
+
+```bash
+
+make generate
+make manifests
+make install
+make run
 ```
 
 ## References

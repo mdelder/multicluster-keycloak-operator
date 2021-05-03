@@ -189,7 +189,7 @@ func (r *AuthorizationDomainReconciler) Reconcile(ctx context.Context, req ctrl.
 }
 
 func (r *AuthorizationDomainReconciler) Delete(ctx context.Context, authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain) (ctrl.Result, error) {
-	r.Log.Error("WARNING: No specialized delete process is currently implemented to clean up created resources.", "AuthorizationDomain.Namespace", authzDomain.Namespace, "AuthorizationDomain.Name", authzDomain.Name)
+	r.Log.Error(errors.NewBadRequest("WARNING: No specialized delete process is currently implemented to clean up created resources."), "AuthorizationDomain.Namespace", authzDomain.Namespace, "AuthorizationDomain.Name", authzDomain.Name)
 	return ctrl.Result{}, nil
 }
 
@@ -353,12 +353,14 @@ func (r *AuthorizationDomainReconciler) createKeycloakClient(clusterContext *man
 				},
 			},
 			Client: &keycloakv1alpha1.KeycloakAPIClient{
-				ClientID:    clusterContext.ClientID,
-				Enabled:     true,
-				Secret:      clusterContext.ClientSecret,
-				BaseURL:     "/oauth2callback/oidcidp",
-				RootURL:     clusterContext.RootURL,
-				Description: "Managed Multicluster Keycloak Client",
+				ClientAuthenticatorType: "client-secret",
+				Name:                    clusterContext.ClientID,
+				ClientID:                clusterContext.ClientID,
+				Enabled:                 true,
+				Secret:                  clusterContext.ClientSecret,
+				BaseURL:                 "/oauth2callback/oidcidp",
+				RootURL:                 clusterContext.RootURL,
+				Description:             "Managed Multicluster Keycloak Client",
 				// DefaultRoles:              []string{},
 				RedirectUris:        []string{"/oauth2callback/oidcidp"},
 				StandardFlowEnabled: true,

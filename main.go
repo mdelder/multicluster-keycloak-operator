@@ -27,6 +27,7 @@ import (
 
 	multiclusterkeycloakv1alpha1 "github.com/mdelder/multicluster-keycloak-operator/api/v1alpha1"
 	"github.com/mdelder/multicluster-keycloak-operator/controllers"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -69,6 +70,18 @@ func init() {
 
 	schemeBuilder = &runtimescheme.Builder{GroupVersion: schema.GroupVersion{Group: "work.open-cluster-management.io", Version: "v1"}}
 	schemeBuilder.Register(&ocmworkv1.ManifestWork{}, &ocmworkv1.ManifestWorkList{})
+	if err := schemeBuilder.AddToScheme(scheme); err != nil {
+		setupLog.Error(err, "")
+		os.Exit(1)
+	}
+
+	schemeBuilder = &runtimescheme.Builder{GroupVersion: schema.GroupVersion{Group: "", Version: "v1"}}
+	schemeBuilder.Register(&corev1.Secret{}, &corev1.SecretList{})
+	if err := schemeBuilder.AddToScheme(scheme); err != nil {
+		setupLog.Error(err, "")
+		os.Exit(1)
+	}
+	schemeBuilder.Register(&corev1.ConfigMap{}, &corev1.ConfigMapList{})
 	if err := schemeBuilder.AddToScheme(scheme); err != nil {
 		setupLog.Error(err, "")
 		os.Exit(1)

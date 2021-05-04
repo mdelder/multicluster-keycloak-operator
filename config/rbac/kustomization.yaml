@@ -12,5 +12,6 @@ resources:
 - auth_proxy_client_clusterrole.yaml
 - keycloak-group-rolebinding.yaml
 - placementrules-rolebinding.yaml
-- managed-cluster-rolebinding.yaml
-- manager-secret-rolebinding.yaml
+- managed_cluster_rolebinding.yaml
+- manager_secret_rolebinding.yaml
+- manifestwork_editor_role.yaml

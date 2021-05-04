@@ -58,6 +58,7 @@ At this point, you can configure the `AuthorizationDomain` object that will refe
     - Use `https://keycloak-keycloak.apps.<clusterName>.<baseDomain>/auth/realms/sso-ad/broker/github/endpoint` for the `OAuthCallbackURL`. The Route will be served by the instance of Keycloak deployed in step 3. The segment "sso-ad" is **MUST** be used as the name of the `AuthorizationDomain` created below. So if you create an `AuthorizationDomain` of a different name, then replace "sso-ad" in this URL with the name that you used for the `AuthorizationDomain`.
     - Retrieve the `clientID` and `clientSecret`.
 2. Create a ConfigMap in the Namespace `keycloak` with the TLS Certificate for the route above (e.g. `https://*.apps.<clusterName>.<baseDomain>`):
+
 ```
 apiVersion:
 kind: ConfigMap
@@ -72,6 +73,11 @@ data:
     -----BEGIN CERTIFICATE-----
     ...
     -----END CERTIFICATE-----
+```
+Note that you can find the value for the certificate chain in `openshift-network-operator/kube-root-ca.crt` or you can discover the certificate with the following command:
+```
+export CONSOLE_URL=console-openshift-console.apps.demo-east-v475-kt5xs.demo.red-chesterfield.com
+openssl s_client -showcerts -servername $CONSOLE_URL -connect $CONSOLE_URL:443 </dev/null 2>/dev/null | openssl x509 -outform PEM > console-crt.pem
 ```
 3. Create a Secret in the Namespace `keycloak` to store the GitHub OAuth `clientID` and `clientSecret`.
 ```

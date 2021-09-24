@@ -39,6 +39,7 @@ import (
 
 	ocmclusterv1 "github.com/open-cluster-management/api/cluster/v1"
 	ocmworkv1 "github.com/open-cluster-management/api/work/v1"
+	routev1 "github.com/openshift/api/route/v1"
 
 	keycloakv1alpha1 "github.com/keycloak/keycloak-operator/pkg/apis/keycloak/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -82,6 +83,12 @@ func init() {
 		os.Exit(1)
 	}
 	schemeBuilder.Register(&corev1.ConfigMap{}, &corev1.ConfigMapList{})
+	if err := schemeBuilder.AddToScheme(scheme); err != nil {
+		setupLog.Error(err, "")
+		os.Exit(1)
+	}
+	schemeBuilder = &runtimescheme.Builder{GroupVersion: schema.GroupVersion{Group: "route.openshift.io", Version: "v1"}}
+	schemeBuilder.Register(&routev1.Route{}, &routev1.RouteList{})
 	if err := schemeBuilder.AddToScheme(scheme); err != nil {
 		setupLog.Error(err, "")
 		os.Exit(1)

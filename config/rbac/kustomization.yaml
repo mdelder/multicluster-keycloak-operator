@@ -15,3 +15,4 @@ resources:
 - managed_cluster_rolebinding.yaml
 - manager_secret_rolebinding.yaml
 - manifestwork_editor_role.yaml
+- route_viewer_role.yaml

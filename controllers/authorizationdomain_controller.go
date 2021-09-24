@@ -39,6 +39,7 @@ import (
 
 	ocmclusterv1 "github.com/open-cluster-management/api/cluster/v1"
 	ocmworkv1 "github.com/open-cluster-management/api/work/v1"
+	routev1 "github.com/openshift/api/route/v1"
 
 	// openshiftconfigv1 "github.com/openshift/api/config/v1"
 
@@ -68,8 +69,10 @@ type managedClusterSSOContext struct {
 	RootURL               string
 	ClientID              string
 	ClientSecret          string
+	CAClientConfigMapName string
 	OAuthConfigSecretName string
 	BaseDomain            string
+	IssuerURL             string
 }
 
 func (r *AuthorizationDomainReconciler) newManagedClusterSSOContext(authzDomain *multiclusterkeycloakv1alpha1.AuthorizationDomain, cluster *ocmclusterv1.ManagedCluster, defaultBaseDomain string) (*managedClusterSSOContext, error) {
@@ -85,6 +88,7 @@ func (r *AuthorizationDomainReconciler) newManagedClusterSSOContext(authzDomain 
 		ManagedCluster:        cluster,
 		ClientID:              fmt.Sprintf("%s-%s", authzDomain.Name, cluster.Name),
 		OAuthConfigSecretName: fmt.Sprintf("%s-%s-oauth-credentials", cluster.Name, authzDomain.Name),
+		CAClientConfigMapName: fmt.Sprintf("%s-ca-config-map", authzDomain.Name),
 	}
 	c.BaseDomain = defaultBaseDomain
 	if c.ManagedCluster.Status.ClusterClaims != nil {
@@ -102,6 +106,20 @@ func (r *AuthorizationDomainReconciler) newManagedClusterSSOContext(authzDomain 
 	}
 	if c.RootURL == "" {
 		return nil, errors.NewNotFound(schema.GroupResource{Group: "cluster.open-cluster-management.io", Resource: "ManagedClusterClaim"}, "ManagedClusterClaim for \"consoleurl.cluster.open-cluster-management.io\" not found. Attempt to reconcile deferred.")
+	}
+	if authzDomain.Spec.IssuerURL != "" {
+		c.IssuerURL = authzDomain.Spec.IssuerURL
+	} else {
+		route := &routev1.Route{}
+		if err := r.Client.Get(context.TODO(), types.NamespacedName{Name: "keycloak", Namespace: "keycloak"}, route); err != nil {
+			if errors.IsNotFound(err) {
+				r.Log.Error(err, "No Route found for Keycloak console (Looked in Namespace: keycloak, Name: keycloak). Must specify AuthorizationDomain.Spec.IssuerURL.")
+			}
+			r.Log.Error(err, "Problem finding route for Keycloak issuerURL (Looked in Namespace: keycloak, Name: keycloak). Must specify AuthorizationDomain.Spec.IssuerURL.")
+		} else {
+			r.Log.Info("Discovered IssuerURL from \"keycloak\" Route in the \"keycloak\" Namespace.", "Route", route)
+			c.IssuerURL = fmt.Sprintf("https://%s/auth/realms/%s", route.Spec.Host, authzDomain.Name)
+		}
 	}
 	return c, nil
 }
@@ -296,6 +314,7 @@ func (r *AuthorizationDomainReconciler) createManifestWork(clusterContext *manag
 		r.Log.Error(err, "Could not find IssuerCertificate.", "issuerCerficate.configMapRef", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
 		return nil, err
 	}
+	// TODO it may now be pulled from somewhere else
 	r.Log.Info("Found IssuerCertificate ConfigMap", "IssuerCertificateName", clusterContext.AuthorizationDomain.Spec.IssuerCertificate.ConfigMapRef)
 	manifestwork := &ocmworkv1.ManifestWork{
 		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-oauth", clusterContext.ClientID), Namespace: clusterContext.ManagedCluster.Name, Labels: map[string]string{"app": "sso"}},
@@ -439,7 +458,7 @@ func (c *managedClusterSSOContext) createOAuthClientManifest() (*ocmworkv1.Manif
 					   "name": "%s"
 					},
 					"ca": {
-					   "name": "ca-config-map"
+					   "name": "%s"
 					},
 					"claims": {
 					   "preferredUsername": [
@@ -458,7 +477,7 @@ func (c *managedClusterSSOContext) createOAuthClientManifest() (*ocmworkv1.Manif
 		   ]
 		}
 	 }
-	`, c.ClientID, c.OAuthConfigSecretName, c.AuthorizationDomain.Spec.IssuerURL))
+	`, c.ClientID, c.OAuthConfigSecretName, c.CAClientConfigMapName, c.IssuerURL))
 	oauthClientManifest := &ocmworkv1.Manifest{}
 	oauthClientManifest.RawExtension = runtime.RawExtension{Raw: oauthClientJSON}
 	return oauthClientManifest, nil
@@ -497,13 +516,26 @@ func (c *managedClusterSSOContext) createIssuerCertificateConfigMap(client clien
 		}
 		// The IssuerCertificate should be created in the "openshift-config" namespace
 		configMap.ObjectMeta.Namespace = "openshift-config"
+		configMap.ObjectMeta.Name = c.CAClientConfigMapName
 		configMap.ObjectMeta.ResourceVersion = ""
 		configMap.ObjectMeta.SelfLink = ""
 		configMap.ObjectMeta.UID = ""
 		configMap.ObjectMeta.ManagedFields = []metav1.ManagedFieldsEntry{}
-		return c.createManifest(configMap)
+	} else {
+		// TODO: Add support to handle BYO certificate customization; this is the default self-signed CA of the hub cluster
+		err := client.Get(context.TODO(), types.NamespacedName{Name: "kube-root-ca.crt", Namespace: "openshift-network-operator"}, configMap)
+		if err != nil {
+			return nil, err
+		}
+		configMap.ObjectMeta.Namespace = "openshift-config"
+		configMap.ObjectMeta.Name = c.CAClientConfigMapName
+		configMap.ObjectMeta.ResourceVersion = ""
+		configMap.ObjectMeta.SelfLink = ""
+		configMap.ObjectMeta.UID = ""
+		configMap.ObjectMeta.ManagedFields = []metav1.ManagedFieldsEntry{}
+
 	}
-	return nil, nil
+	return c.createManifest(configMap)
 }
 
 func (c *managedClusterSSOContext) createManifest(obj interface{}) (*ocmworkv1.Manifest, error) {
